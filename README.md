@@ -33,22 +33,44 @@ The documentations and implementation details can be found in
 ```bash
 helloWorld.py
 ```
-Figure 3 shows the computation time performance of each method. In particular, the figure shows the Newton-Raphson is the fastest and the steepest descent slowest when tolerance is sufficiently small. (I define the tolerance to be the maximal absolute distance between the updates. See the source code for implementation details.)
+Figure 3 shows the computation time performance of each method. In particular, the figure shows the Newton-Raphson is the fastest and the steepest descent slowest when tolerance is sufficiently small. (I define the tolerance to be the maximal absolute distance between the updates of the optimizers. See the source code for implementation details.)
 
 Figure 4 shows the numerical estimate for x. With respect to the accuracy of numerical estimates, the Newton-Raphson shows the fastest convergence and the BFGS method the slowest.
 
 
+## Problem 4: Pareto Efficient Allocations
 
 
-## Problem 4
 
+
+## Problem 5: Equilibrium Allocations
+We obtain the equilibrium allocations using a nested optimization approach.
+
+Each agent j solves
+max_{x(1), ..., x(m)} sum_i alpha_i*(x(i)^(1+w(i))/(1+w(i)))
+such that
+sum_i p(i)*x(i) = sum_i p(i)*e(i).
+The FOCs of the agent are
+(alpha(k)*x(k)^w(k))/(alpha(1)*x(1)^w(1)) = p(k)/p(1), k=2,..., m
+sum_i p(i)*x(i) = sum_i p(i)*e(i).
+
+Given a price vector p, we can solve for the optimial allocations by minimizing the FOC errors. That is, by choosing x(i) that minimize sum_k ((alpha(k)*x(k)^w(k))/(alpha(1)*x(1)^w(1)) - p(k)/p(1))^2 + (sum_i p(i)*x(i) - sum_i p(i)*e(i))^2.
+
+As such, we can obtain the equilibrium price vector as that clears the market. That is, we may obtain p such that
+sum_j x(j,p) = sum_j e(j,i), i=1, ..., n.
+by choosing p(i) that minimize 
+sum_i (sum_j x(j,p) - sum_j e(j,i))^2.
+
+The implementation details and test cases can be found in
 ```bash
-pip install foobar
+helloWorld.py
 ```
 
-```python
-import foobar
-```
+
+
+
+
+
 
 ## License
 [MIT](https://choosealicense.com/licenses/mit/)
