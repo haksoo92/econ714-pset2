@@ -21,7 +21,7 @@ Figure 1 shows compute-time performance comparision with respect to the number o
 Figure 2 shows numerical accuracy performance comparison with respect to the number of intervals in estimation. In particular, it shows that the Monte Carlo method is relatively inaccurate in lower N buy converges to the estimates of other methods as N grows.
 
 
-## Problem 3
+## Problem 3: Optimization
 ```python
 minimizeNewtonRaphson_fd(objFct, grad_objFct, hess_objFct, x0, tol)
 minimize_BFGS(objFct, grad_objFct, hess_objFct, x0, tol)
