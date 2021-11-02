@@ -71,15 +71,15 @@ array([[0.98684766, 0.98684766, 0.98684763],
 Next, I consider the following asymmetric case in which agents are heterogeneous:
 ```python
 Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
-Oomega = np.array([[-0.6, -0.5, -0.4], [-0.5, -0.5, -0.5], [-0.4, -0.5, -0.6]])
+Oomega = np.array([[-0.8, -0.5, -0.2], [-0.5, -0.5, -0.5], [-0.4, -0.5, -0.6]])
 llambda = np.array([0.5, 0.3, 0.2])
 Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
 ```
 And we obtain that the Pareto efficient allocations are
 ```python
-array([[1.02446797, 0.98683915, 0.9462659 ],
-       [0.37060194, 0.35526582, 0.34443121],
-       [0.10493009, 0.15789503, 0.20930289]])
+array([[1.02175686, 0.98684044, 0.9368004 ],
+       [0.37260134, 0.35526176, 0.35072146],
+       [0.10564179, 0.1578978 , 0.21247814]])
 ```
 
 The BFGS algorithm finds the optima quickly (less than 2 seconds). Yet, depending on initial values, it may fail to converge. To avoid convergence failures, one may use converged allocations in a model with similar parameters as initial values. 
@@ -124,6 +124,33 @@ helloWorld.py
 
 
 
+### Symmetric Case
+First, I consider the following symmetric case:
+```python
+Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
+Oomega = np.array([[-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5]])
+Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
+```
+And we obtain that the prices are
+```python
+array([2.20219898, 2.10441402, 2.10461285])
+```
+where p(i) indicates the price of the good i.
+
+
+
+### Asymmetric Case
+Next, I consider the following asymmetric case in which agents are heterogeneous:
+```python
+Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
+Oomega = np.array([[-0.8, -0.5, -0.2], [-0.5, -0.5, -0.5], [-0.4, -0.5, -0.6]])
+Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
+```
+And we obtain that the Pareto efficient allocations are
+And we obtain that the prices are
+```python
+array([2.11652572, 2.00912708, 1.97596606])
+```
 
 
 
