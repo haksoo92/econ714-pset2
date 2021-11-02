@@ -6,6 +6,8 @@ from numpy.core.numeric import outer
 from numpy.linalg import eig
 import scipy
 from scipy.sparse import dok
+import time
+import matplotlib.pyplot as plt
 
 # =========================================================
 # Problem 2: Integration
@@ -39,13 +41,23 @@ def integrandFct(t, rrho, llambda):
 def getStepSize(a, b, n):
     return (b-a)/n
 
-# Numerically integrate using the midpoint rule
+
 def integrateMidpoint(a, b, n, rrho, llambda):
+    """
+    Numerically integrate using the midpoint rule
+
+    :param a: lower bound of the integral
+    :param b: upper bound of the integral
+    :param n: number of intervals
+    :param rrho: problem parameter
+    :param llambda: problem parameter
+    :return: numerical integral
+    """
     currSum = 0
     h = getStepSize(a, b, n)
     for j in range(1,n+1):
         currEvalPoint = a + ((j-0.5)*h)
-        currArea = integrandFct(currEvalPoint, rrho, llambda)
+        currArea = h*integrandFct(currEvalPoint, rrho, llambda)
         currSum = currSum + currArea
     return currSum
 
@@ -54,9 +66,20 @@ print("Midpoint Rule Estimate: "+ str(integrateMidpoint(a, b, n, rrho, llambda))
 # .........................................................
 # Trapezoid
 
-# Numerically integrate using the trapezoid rule
+
+
 # !Typo in the notes NM_1 Slide 22: f is evaluated at a + h*j
 def integrateTrapezoid(a, b, n, rrho, llambda):
+    """
+    Numerically integrate using the trapezoid rule
+
+    :param a: lower bound of the integral
+    :param b: upper bound of the integral
+    :param n: number of intervals
+    :param rrho: problem parameter
+    :param llambda: problem parameter
+    :return: numerical integral
+    """
     h = getStepSize(a, b, n)
     currSum = 0
     for j in range(1,n): # loop to n-1
@@ -75,9 +98,18 @@ print("Trapezoid Rule Estimate: "+ str(integrateTrapezoid(a, b, n, rrho, llambda
 def getEvalPoint(a, h, j):
     return a + (j*h)
 
-# Numerically integrate using the trapezoid rule
-# Assumes n is even
+
 def integrateSimpson(a, b, n, rrho, llambda):
+    """
+    Numerically integrate using the Simpson's rule
+
+    :param a: lower bound of the integral
+    :param b: upper bound of the integral
+    :param n: number of intervals
+    :param rrho: problem parameter
+    :param llambda: problem parameter
+    :return: numerical integral
+    """
     h = getStepSize(a, b, n)
     currSum1 = 0
     currSum2 = 0
@@ -97,6 +129,16 @@ print("Simpson Rule Estimate: "+ str(integrateSimpson(a, b, n, rrho, llambda)))
 # Numerically integrate using the trapezoid rule
 # Assumes n is even
 def integrateMonteCarlo(a, b, n, rrho, llambda):
+    """
+    Numerically integrate using the Monte Carlo method
+
+    :param a: lower bound of the integral
+    :param b: upper bound of the integral
+    :param n: number of intervals
+    :param rrho: problem parameter
+    :param llambda: problem parameter
+    :return: numerical integral
+    """
     # Get uniform draws from [0,T]
     x_vec = np.random.uniform(low=0, high=b, size=n)
     currSum = 0
@@ -111,8 +153,80 @@ print("Monte Carlo Estimate: "+ str(integrateMonteCarlo(a, b, n, rrho, llambda))
 # .........................................................
 # Performance Comparison
 
-# TODO: Write the compute time function that takes as input function to compute
+# Write the compute time function that takes as input function to compute
 #       to compute the time-to-compute
+dat_n= []
+dat_t_mid = []
+dat_t_trap = []
+dat_t_simpson = []
+dat_t_monte = []
+dat_y_mid = []
+dat_y_trap = []
+dat_y_simpson = []
+dat_y_monte = []
+
+
+def getPerformance(f, a, b, n, rrho, llambda):
+    start = time.time()
+    estval = f(a, b, n, rrho, llambda)
+    end = time.time()
+    return (end-start, estval)
+
+# Test
+t, val = getPerformance(integrateMonteCarlo, a, b, n, rrho, llambda)
+
+NN = 1e6
+curr_n = 1e2
+dt = 1e1
+loop_st = time.time()
+while True:
+    n = int(curr_n)
+    t_mid, val_mid = getPerformance(integrateMidpoint, a, b, n, rrho, llambda)
+    t_trap, val_trap = getPerformance(integrateTrapezoid, a, b, n, rrho, llambda)
+    t_simp, val_simp = getPerformance(integrateSimpson, a, b, n, rrho, llambda)
+    t_monte, val_monte = getPerformance(integrateMonteCarlo, a, b, n, rrho, llambda)
+
+    dat_n.append(curr_n)
+
+    dat_t_mid.append(t_mid)
+    dat_t_trap.append(t_trap)
+    dat_t_simpson.append(t_simp)
+    dat_t_monte.append(t_monte)    
+
+    dat_y_mid.append(val_mid)
+    dat_y_trap.append(val_trap)
+    dat_y_simpson.append(val_simp)
+    dat_y_monte.append(val_monte)
+
+    curr_n = curr_n*dt
+
+    loop_et = time.time()
+
+    print(curr_n)
+    if curr_n > NN or loop_et - loop_st > 20:
+        break
+
+plt.plot(dat_n, dat_t_mid)
+plt.plot(dat_n, dat_t_trap)
+plt.plot(dat_n, dat_t_simpson)
+plt.plot(dat_n, dat_t_monte)
+plt.xscale('log')
+plt.title('Peformance Comparison')
+plt.ylabel('Compute Time (seconds)')
+plt.xlabel('N')
+plt.legend(['Midpoint', 'Trapezoid', 'Simpson', 'Monte Carlo'])
+plt.show()
+
+plt.plot(dat_n, dat_y_mid)
+plt.plot(dat_n, dat_y_trap)
+plt.plot(dat_n, dat_y_simpson)
+plt.plot(dat_n, dat_y_monte)
+plt.xscale('log')
+plt.title('Peformance Comparison')
+plt.ylabel('Numerical Estimates (seconds)')
+plt.xlabel('N')
+plt.legend(['Midpoint', 'Trapezoid', 'Simpson', 'Monte Carlo'])
+plt.show()
 
 
 # =========================================================
@@ -167,6 +281,16 @@ print(minimizeNewtonRaphson(eq, grad_obj, hess_obj, x0, tol))
 
 # Define Newton-Raphson optimizer (finite difference)
 def minimizeNewtonRaphson_fd(f, df, ddf, x0, tol):
+    """
+    Minimize the objective function f using the Newton-Raphson method
+
+    :param f: the objective function
+    :param df: the gradient of the objective (nd object)
+    :param ddf: the hessian of the objective (nd object)
+    :param x0: the initial point
+    :param tol: tolerance
+    :return: numerical minimizer
+    """
     df_x0 = df(x0)
     ddf_x0 = ddf(x0)
     inv_ddf_x0 = np.linalg.inv(ddf_x0)
@@ -190,6 +314,16 @@ print(minimizeNewtonRaphson_fd(objFct, grad_objFct, hess_objFct, x0, tol))
 # .........................................................
 # (2) BFGS
 def minimize_BFGS(objFct, grad_objFct, hess_objFct, x0, tol):
+    """
+    Minimize the objective function f using the BFGS method
+
+    :param f: the objective function
+    :param df: the gradient of the objective (nd object)
+    :param ddf: the hessian of the objective (nd object)
+    :param x0: the initial point
+    :param tol: tolerance
+    :return: numerical minimizer
+    """
     g0 = grad_objFct(x0)
     Q0 = hess_objFct(x0)
     H0 = np.linalg.inv(Q0)
@@ -216,7 +350,17 @@ print(minimize_BFGS(objFct, grad_objFct, hess_objFct, x0, tol))
 # (3) Steepest descent
 from scipy.optimize import minimize
 
-def minimizeSD(objFct, grad_objFct, x0, tol):
+def minimizeSD(objFct, grad_objFct, hess_objFct, x0, tol):
+    """
+    Minimize the objective function f using the steepest descent method
+
+    :param f: the objective function
+    :param df: the gradient of the objective (nd object)
+    :param ddf: the hessian of the objective (nd object)
+    :param x0: the initial point
+    :param tol: tolerance
+    :return: numerical minimizer
+    """
     while True:
         d0 = -grad_objFct(x0)
 
@@ -237,16 +381,26 @@ objFct = lambda x : 100*((x[1]-(x[0]**2))**2) + (1.-x[0])**2
 grad_objFct = nd.Gradient(objFct)
 x0 = np.array([-2,2])
 tol = 1e-6
-print(minimizeSD(objFct, grad_objFct, x0, tol))
+print(minimizeSD(objFct, grad_objFct, hess_objFct, x0, tol))
 
 
 # .........................................................
 # (4) Conjugate descent
 objFct = lambda x : 100*((x[1]-(x[0]**2))**2) + (1.-x[0])**2
 grad_objFct = nd.Gradient(objFct)
-# hess_objFct = nd.Hessian(objFct)
+hess_objFct = nd.Hessian(objFct)
 
-def minimizeCD(objFct, grad_objFct, x0, tol):
+def minimizeCD(objFct, grad_objFct, hess_objFct, x0, tol):
+    """
+    Minimize the objective function f using the conjugate descent method
+
+    :param f: the objective function
+    :param df: the gradient of the objective (nd object)
+    :param ddf: the hessian of the objective (nd object)
+    :param x0: the initial point
+    :param tol: tolerance
+    :return: numerical minimizer
+    """
     r0 = -grad_objFct(x0)
     d0 = r0
     while True:
@@ -270,13 +424,108 @@ def minimizeCD(objFct, grad_objFct, x0, tol):
 
 x0 = np.array([-2,2])
 tol = 1e-6
-print(minimizeCD(objFct, grad_objFct, x0, tol))
+print(minimizeCD(objFct, grad_objFct, hess_objFct, x0, tol))
+
+# Performance comparison
+dat_tol= []
+dat_t_newton = []
+dat_t_bfgs = []
+dat_t_sd = []
+dat_t_cd = []
+dat_y1_newton = []
+dat_y2_newton = []
+dat_y1_bfgs = []
+dat_y2_bfgs = []
+dat_y1_sd = []
+dat_y2_sd = []
+dat_y1_cd = []
+dat_y2_cd = []
+
+def getPerformance3(f, objFct, grad_objFct, hess_objFct, x0, tol):
+    start = time.time()
+    estval = f(objFct, grad_objFct, hess_objFct, x0, tol)
+    end = time.time()
+    return (end-start, estval)
+
+# Test
+objFct = lambda x : 100*((x[1]-(x[0]**2))**2) + (1.-x[0])**2
+grad_objFct = nd.Gradient(objFct)
+hess_objFct = nd.Hessian(objFct)
+x0 = np.array([-2,2])
+tol = 1e-12
+t, val = getPerformance3(minimize_BFGS, objFct, grad_objFct, hess_objFct, x0, tol)
+
+max_tol = 1e-10
+curr_tol = 1e-1
+dt = 1e-1
+loop_st = time.time()
+while True:
+    tol = curr_tol
+    t_newton, val_newton = getPerformance3(minimizeNewtonRaphson_fd, objFct, grad_objFct, hess_objFct, x0, tol)
+    t_bfgs, val_bfgs = getPerformance3(minimize_BFGS, objFct, grad_objFct, hess_objFct, x0, tol)
+    t_sd, val_sd = getPerformance3(minimizeSD, objFct, grad_objFct, hess_objFct, x0, tol)
+    t_cd, val_cd = getPerformance3(minimizeCD, objFct, grad_objFct, hess_objFct, x0, tol)
+
+    dat_tol.append(curr_tol)
+
+    dat_t_newton.append(t_newton)
+    dat_t_bfgs.append(t_bfgs)
+    dat_t_sd.append(t_sd)
+    dat_t_cd.append(t_cd)    
+
+    dat_y1_newton.append(val_newton[0])
+    dat_y2_newton.append(val_newton[1])
+    dat_y1_bfgs.append(val_bfgs[0,0])
+    dat_y2_bfgs.append(val_bfgs[1,0])
+    dat_y1_sd.append(val_sd[0])
+    dat_y2_sd.append(val_sd[1])
+    dat_y1_cd.append(val_cd[0])
+    dat_y2_cd.append(val_cd[1])
+    
+    curr_tol = curr_tol*dt
+
+    loop_et = time.time()
+
+    if curr_tol <= max_tol:
+        break
+
+plt.plot(dat_tol, dat_t_newton)
+plt.plot(dat_tol, dat_t_bfgs)
+plt.plot(dat_tol, dat_t_sd)
+plt.plot(dat_tol, dat_t_cd)
+plt.xscale('log')
+plt.title('Peformance Comparison')
+plt.ylabel('Compute Time (seconds)')
+plt.xlabel('Tolerance')
+plt.legend(['Newton-Raphson', 'BFGS', 'Steepest Descent', 'Conjugate Descent'])
+plt.show()
+
+plt.plot(dat_tol, dat_y1_newton)
+plt.plot(dat_tol, dat_y1_bfgs)
+plt.plot(dat_tol, dat_y1_sd)
+plt.plot(dat_tol, dat_y1_cd)
+plt.xscale('log')
+plt.title('Peformance Comparison')
+plt.ylabel('Numerical Estimates')
+plt.xlabel('Tolerance')
+plt.legend(['Newton-Raphson', 'BFGS', 'Steepest Descent', 'Conjugate Descent'])
+plt.show()
 
 
 # =========================================================
 # Problem 4: Pareto Efficient Allocations
 # =========================================================
 def util_i(x, aalpha, oomega, m, n):
+    """
+    Computes the agent i's utility given model parameters
+
+    :param x: a vector of allocations
+    :param aalpha: a vector of goods weights
+    :param oomega: a vector of elasticities across goods
+    :param m: number of goods
+    :param n: nubmer of individuals
+    :return: utility of an agent
+    """
     sum_util = 0
     for i in range(m):
         curr_util = aalpha[i]*((x[i]**(1+oomega[i]))/(1+oomega[i]))
@@ -292,6 +541,17 @@ oomega_i = np.array([-0.3, -0.4, -0.3])
 util_i(x_i, aalpha, oomega_i, m, n)
 
 def  util_social(X, Aalpha, Oomega, m, n, llambda):
+    """
+    Computes the social utility
+
+    :param X: a matrix of allocations (j=hh,i=good)
+    :param Aalpha: a matrix of goods weights
+    :param Oomega: a matrix of elasticities across goods
+    :param m: number of goods
+    :param n: nubmer of individuals
+    :param llambda: a vector of social weights
+    :return: social utility
+    """
     sum_util_social = 0
     for j in range(n):
         curr_x_i = X[j,:]
@@ -310,41 +570,84 @@ llambda = np.array([0.1, 0.3, 0.6])
 
 util_social(X, Aalpha, Oomega, m, n, llambda)
 
-def lagrangian_obj(X_vec, lm_vec, llambda_vec, Aalpha, Oomega, Endow, m, n):
-    X = X_vec.reshape(n,m)
+# ................
+# Symmetric Case I
+# ................
+
+# X = np.array([[0.2, 0.2, 0.6], [0.2, 0.2, 0.6], [0.8, 0.2, 0.6]])
+Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
+# Oomega = np.array([[-0.3, -0.9, -0.3], [-0.3, -0.9, -0.3], [-0.3, -0.9, -0.3]])
+Oomega = np.array([[-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5]])
+llambda = np.array([0.5, 0.3, 0.2])
+Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
+
+def pareto_obj(X_vec, llambda_vec, Aalpha, Oomega, Endow, m, n):
+    """
+    Substitutes in the constraints so that X_vec is of dimension (n-1) by m
+    """
+    X = X_vec.reshape(n-1,m)
+    X_sum = np.sum(X, axis=0)
+    endow_sum = np.sum(Endow, axis=0)
+    X = np.append(X, [endow_sum-X_sum], axis=0)
     llambda = llambda_vec
-    lm = lm_vec
-    outer_sum = 0
-    for i in range(m): # product
-        inner_sum = 0
-        for j in range(n): # agent
-            inner_sum = inner_sum + (Endow[i,j] - X[i,j])
-        outer_sum = outer_sum + lm[i]*inner_sum
-        # print("outersum")
-        # print(outer_sum)
-    return util_social(X, Aalpha, Oomega, m, n, llambda) + outer_sum
+    return util_social(X, Aalpha, Oomega, m, n, llambda)
 
 # Test
-X_vec = X.reshape(m*n,)
-lm_vec = np.array([0.1, 0.1, 0.1])
-llambda_vec = np.array([0.1, 0.3, 0.6])
-Endow = np.array([[0.5, 0.5, 0.5], [0.2, 0.2, 0.2], [0.8, 0.4, 0.2]])
+X = np.array([[0.2, 0.2, 0.6], [0.2, 0.2, 0.6]])
+X_vec = X.reshape(m*(n-1),)
 
-lagrangian_obj(X_vec, lm_vec, llambda_vec, Aalpha, Oomega, Endow, m, n)
+llambda_vec = llambda
+-pareto_obj(X_vec, llambda_vec, Aalpha, Oomega, Endow, m, n)
 
-wrapped_lagrangian = lambda x : lagrangian_obj(x[0:m*n], x[m*n:], llambda_vec, Aalpha, Oomega, Endow, m, n)
-grad_wrapped_lagrangian = nd.Gradient(wrapped_lagrangian)
+obj = lambda x : -pareto_obj(x, llambda_vec, Aalpha, Oomega, Endow, m, n)
 
-objfct_pareto = lambda x: np.sum(grad_wrapped_lagrangian(x)**2)
+x0 = np.ones((m*(n-1),))*.5
+res = minimize(obj, x0, method='BFGS')
 
+Xres_vec = res.x
+Xres = Xres_vec.reshape(n-1,m)
+Xres_sum = np.sum(Xres, axis=0)
+endow_sum = np.sum(Endow, axis=0)
+Xres = np.append(Xres, [endow_sum- Xres_sum], axis=0) # pareto optimal allocation
+Xres
 
+# ..................
+# Asymmetric Case II
+# ..................
+
+# X = np.array([[0.2, 0.2, 0.6], [0.2, 0.2, 0.6], [0.8, 0.2, 0.6]])
+Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
+# Oomega = np.array([[-0.6, -0.5, -0.4], [-0.5, -0.5, -0.5], [-0.4, -0.5, -0.6]])
+Oomega = np.array([[-0.8, -0.5, -0.2], [-0.5, -0.5, -0.5], [-0.4, -0.5, -0.6]])
+llambda = np.array([0.5, 0.3, 0.2])
+Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
+
+def pareto_obj(X_vec, llambda_vec, Aalpha, Oomega, Endow, m, n):
+    X = X_vec.reshape(n-1,m)
+    X_sum = np.sum(X, axis=0)
+    endow_sum = np.sum(Endow, axis=0)
+    X = np.append(X, [endow_sum-X_sum], axis=0)
+    llambda = llambda_vec
+    return util_social(X, Aalpha, Oomega, m, n, llambda)
 
 # Test
-x0 = np.ones((12,))*(5)
-tol = 1e-2
-res = minimize(objfct_pareto, x0, method='BFGS')
+X = np.array([[0.2, 0.2, 0.6], [0.2, 0.2, 0.6]])
+X_vec = X.reshape(m*(n-1),)
 
+llambda_vec = llambda
+-pareto_obj(X_vec, llambda_vec, Aalpha, Oomega, Endow, m, n)
 
+obj = lambda x : -pareto_obj(x, llambda_vec, Aalpha, Oomega, Endow, m, n)
+
+x0 = np.ones((m*(n-1),))*0.21
+res = minimize(obj, x0, method='BFGS')
+
+Xres_vec = res.x
+Xres = Xres_vec.reshape(n-1,m)
+Xres_sum = np.sum(Xres, axis=0)
+endow_sum = np.sum(Endow, axis=0)
+Xres = np.append(Xres, [endow_sum- Xres_sum], axis=0) # pareto optimal allocation
+Xres
 
 # =========================================================
 # Problem 5: Equilibrium Allocation
@@ -367,7 +670,7 @@ def getExcessDemand(price_vec, e_vec, aalpha, oomega, m, n):
     """
     objfct = lambda x_vec: getFocErr(price_vec, x_vec, e_vec, aalpha, oomega)
 
-    x_vec0 = np.ones((m,))
+    x_vec0 = np.ones((m,))*0.5
     res = minimize(objfct, x_vec0, method='BFGS')
     x_vec1 = res.x
 
@@ -402,31 +705,32 @@ getPriceFocErr(price_vec, E, Aalpha, Oomega, m, n)
 
 def getEqPrice(E, Aalpha, Oomega, m, n):
     objfct = lambda price_vec: getPriceFocErr(price_vec, E, Aalpha, Oomega, m, n)
-    p_vec0 = np.ones((m,))
+    p_vec0 = np.ones((m,))*2.0
     res = minimize(objfct, p_vec0, method='BFGS')
     p_vec1 = res.x
     return p_vec1
 
-# Test
-getEqPrice(E, Aalpha, Oomega, m, n)
+# ................
+# Symmetric Case I
+# ................
+
+Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
+Oomega = np.array([[-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5]])
+Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
+
+getEqPrice(Endow, Aalpha, Oomega, m, n)
 
 
+# ..................
+# Asymmetric Case II
+# ..................
 
+Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
+Oomega = np.array([[-0.8, -0.5, -0.2], [-0.5, -0.5, -0.5], [-0.4, -0.5, -0.6]])
+Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
+
+getEqPrice(Endow, Aalpha, Oomega, m, n)
 
 
 
     
-"""
-def lagrangian_demand(x_vec, price_vec, aalpha, oomega, endow, m, n):
-    X = X_vec.reshape(n,m)
-    llambda = llambda_vec
-    outer_sum = 0
-    for i in range(m): # product
-        inner_sum = 0
-        for j in range(n): # agent
-            inner_sum = inner_sum + (Endow[i,j] - X[i,j])
-        outer_sum = outer_sum + llambda[i]*inner_sum
-        # print("outersum")
-        # print(outer_sum)
-    return util_social(X, Aalpha, Oomega, m, n, llambda) + outer_sum
-"""
