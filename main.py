@@ -3,734 +3,699 @@ from re import S
 import numpy as np
 from numpy.core.fromnumeric import reshape
 from numpy.core.numeric import outer
+from numpy.lib import polynomial
 from numpy.linalg import eig
 import scipy
 from scipy.sparse import dok
 import time
 import matplotlib.pyplot as plt
-
-# =========================================================
-# Problem 2: Integration
-# =========================================================
-# Compute \int_0^T exp(-\rho t) u(1-exp(-\lambda t)) dt
-# T = 100, \rho = 0.04, \lambda = 0.02, u(c) = -exp(-c)
-
-# Set parameters
-T = 100
-rrho = 0.04
-llambda = 0.02
+import time
+from scipy.optimize import fsolve
+import tensorflow as tf
 
 
-# Compute utility given consumption
-def utilityFct(cc):
-    return -math.exp(-cc)
+# ======================================================================================================
+# Problem 1: Steady State
+# Probelm 2: Value Function Iteration with a Fixed Grid 
+def runVFI(nk, tolerance):
+
+    t1=time.time()
+
+    aalpha = 1.0/3.0
+    bbeta  = 0.97
+    ddelta = 0.10
+
+    vProductivity = np.array([-0.05, 0, 0.05],float)
+    mTransition   = np.array([[0.97, 0.03, 0.00],
+                    [0.01, 0.98, 0.01],
+                    [0.00, 0.03, 0.97]],float)
+
+    # 1. Steady State
+    klSteadyState = (aalpha/((1/bbeta) - (1-ddelta)))**(1/(aalpha-1))
+    qqq1= klSteadyState**aalpha - ddelta*klSteadyState
+    qqq2 = (1-aalpha)*(klSteadyState**aalpha)
+    lSteadyState = (qqq2/qqq1)**(1/2)
+    capitalSteadyState = klSteadyState*lSteadyState
+    outputSteadyState = (klSteadyState**aalpha)*lSteadyState
+    consumptionSteadyState = lSteadyState*qqq1
+
+    print("Output = ", outputSteadyState, " Capital = ", capitalSteadyState, " Consumption = ", consumptionSteadyState) 
 
 
-# .........................................................
-# Midpoint
-a = 0
-b = T
-n = 100 # number of intervals
+    # 2. VFI with a fixed grid
+    def getLabor(cc, kk, zz, aalpha):
+        return (np.exp(zz)*(kk**aalpha)/cc)**(1/(1+aalpha))
 
-# Define the function to integrate
-def integrandFct(t, rrho, llambda):
-    return math.exp(-rrho*t)*utilityFct(1-math.exp(-llambda*t))
+    vGridCapital = np.arange(0.1*capitalSteadyState,1.9*capitalSteadyState,(1.9*capitalSteadyState-0.1*capitalSteadyState)/nk)
+    nGridCapital = len(vGridCapital)
+    nGridProductivity = len(vProductivity)
 
+    # mOutput           = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+    mValueFunction    = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+    mValueFunctionNew = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+    mPolicyFunction   = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+    expectedValueFunction = np.zeros((nGridCapital,nGridProductivity),dtype=float)
 
-# Compute step size
-def getStepSize(a, b, n):
-    return (b-a)/n
+    # for nProductivity in range(nGridProductivity):
+    #     mOutput[:,nProductivity] = np.exp(vProductivity[nProductivity])*(vGridCapital**aalpha)
 
+    maxDifference = 10.0
+    # tolerance = 1e-2
+    iteration = 0
 
-def integrateMidpoint(a, b, n, rrho, llambda):
-    """
-    Numerically integrate using the midpoint rule
+    while(maxDifference > tolerance):
+        expectedValueFunction = np.dot(mValueFunction,mTransition.T)
+        for nProductivity in range(nGridProductivity):
+            # We start from previous choice (monotonicity of policy function)
+            gridCapitalNextPeriod = 0
+            for nCapital in range(nGridCapital):
+                valueHighSoFar = -100000.0
+                capitalChoice  = vGridCapital[0]
+                for nCapitalNextPeriod in range(gridCapitalNextPeriod, nGridCapital):
+                    kprime = vGridCapital[nCapitalNextPeriod]
+                    zz = vProductivity[nProductivity]
+                    kk = vGridCapital[nCapital]
 
-    :param a: lower bound of the integral
-    :param b: upper bound of the integral
-    :param n: number of intervals
-    :param rrho: problem parameter
-    :param llambda: problem parameter
-    :return: numerical integral
-    """
-    currSum = 0
-    h = getStepSize(a, b, n)
-    for j in range(1,n+1):
-        currEvalPoint = a + ((j-0.5)*h)
-        currArea = h*integrandFct(currEvalPoint, rrho, llambda)
-        currSum = currSum + currArea
-    return currSum
+                    objfun = lambda cons: -kprime + np.exp(zz)*(kk**aalpha)*(getLabor(cons, kk, zz, aalpha)**(1-aalpha)) - cons + (1-ddelta)*kk
+                    consuption_initialguess = 0.5
+                    consumption = fsolve(objfun, consuption_initialguess)
+                    labor = getLabor(consumption, kk, zz, aalpha)
 
-print("Midpoint Rule Estimate: "+ str(integrateMidpoint(a, b, n, rrho, llambda)))
+                    expectedValueFunction = np.dot(mTransition[nProductivity,:],mValueFunction[nCapitalNextPeriod,:])
+                    valueProvisional = (1-bbeta)*(math.log(consumption) - (labor**2)/2) + bbeta*expectedValueFunction
+                    if  valueProvisional>valueHighSoFar:
+                        valueHighSoFar = valueProvisional
+                        capitalChoice = vGridCapital[nCapitalNextPeriod]
+                        gridCapitalNextPeriod = nCapitalNextPeriod
+                    else:
+                        break
+                mValueFunctionNew[nCapital,nProductivity] = valueHighSoFar
+                mPolicyFunction[nCapital,nProductivity]   = capitalChoice
 
-# .........................................................
-# Trapezoid
+        maxDifference = (abs(mValueFunctionNew-mValueFunction)).max()
 
+        mValueFunction    = mValueFunctionNew
+        mValueFunctionNew = np.zeros((nGridCapital,nGridProductivity),dtype=float)
 
+        iteration += 1
+        if(iteration%10 == 0 or iteration == 1):
+            print(" Iteration = ", iteration, ", Sup Diff = ", maxDifference)
+            
+    print(" Iteration = ", iteration, ", Sup Duff = ", maxDifference)
+    print(" ")
+    # print(" My Check = ", mPolicyFunction[1000-1,3-1])
+    print(" ")
 
-# !Typo in the notes NM_1 Slide 22: f is evaluated at a + h*j
-def integrateTrapezoid(a, b, n, rrho, llambda):
-    """
-    Numerically integrate using the trapezoid rule
+    t2=time.time()
+    print("Elapse time = is ", t2-t1)
 
-    :param a: lower bound of the integral
-    :param b: upper bound of the integral
-    :param n: number of intervals
-    :param rrho: problem parameter
-    :param llambda: problem parameter
-    :return: numerical integral
-    """
-    h = getStepSize(a, b, n)
-    currSum = 0
-    for j in range(1,n): # loop to n-1
-        currEvalPoint = a + (j*h)
-        currArea = integrandFct(currEvalPoint, rrho, llambda)
-        currSum = currSum + currArea
-    return h*(currSum + 0.5*(integrandFct(a, rrho, llambda) + integrandFct(b, rrho, llambda)))
+    return mValueFunction, mPolicyFunction, t2-t1
 
-print("Trapezoid Rule Estimate: "+ str(integrateTrapezoid(a, b, n, rrho, llambda)))
+# ===========================================================================================
+# Problem 3: Accelerator
+def runVFI_accelerator(nk, tolerance):
 
+    t1=time.time()
 
-# .........................................................
-# Simpson
+    aalpha = 1.0/3.0
+    bbeta  = 0.97
+    ddelta = 0.10
 
-# Get evaluation points for the trapezoid and Simpson's Rules
-def getEvalPoint(a, h, j):
-    return a + (j*h)
-
-
-def integrateSimpson(a, b, n, rrho, llambda):
-    """
-    Numerically integrate using the Simpson's rule
-
-    :param a: lower bound of the integral
-    :param b: upper bound of the integral
-    :param n: number of intervals
-    :param rrho: problem parameter
-    :param llambda: problem parameter
-    :return: numerical integral
-    """
-    h = getStepSize(a, b, n)
-    currSum1 = 0
-    currSum2 = 0
-    for j in range(1, int(n/2)):
-        currEvalPoint1 = getEvalPoint(a, h, 2*j)
-        currSum1 = currSum1 + integrandFct(currEvalPoint1, rrho, llambda)
-    for j in range(1, int(n/2+1)):
-        currEvalPoint2 = getEvalPoint(a, h, (2*j)-1)
-        currSum2 = currSum2 + integrandFct(currEvalPoint2, rrho, llambda)
-    return (h/3)*(integrandFct(a, rrho, llambda) + (2*currSum1) + (4*currSum2) + integrandFct(b, rrho, llambda)) 
-
-print("Simpson Rule Estimate: "+ str(integrateSimpson(a, b, n, rrho, llambda)))
-
-# .........................................................
-# Monte Carlo
-
-# Numerically integrate using the trapezoid rule
-# Assumes n is even
-def integrateMonteCarlo(a, b, n, rrho, llambda):
-    """
-    Numerically integrate using the Monte Carlo method
-
-    :param a: lower bound of the integral
-    :param b: upper bound of the integral
-    :param n: number of intervals
-    :param rrho: problem parameter
-    :param llambda: problem parameter
-    :return: numerical integral
-    """
-    # Get uniform draws from [0,T]
-    x_vec = np.random.uniform(low=0, high=b, size=n)
-    currSum = 0
-    for j in range(n):
-        currEvalPoint = x_vec[j]
-        currSum = currSum + integrandFct(currEvalPoint, rrho, llambda)
-    return (b/n)*currSum
-
-print("Monte Carlo Estimate: "+ str(integrateMonteCarlo(a, b, n, rrho, llambda)))
+    vProductivity = np.array([-0.05, 0, 0.05],float)
+    mTransition   = np.array([[0.97, 0.03, 0.00],
+                    [0.01, 0.98, 0.01],
+                    [0.00, 0.03, 0.97]],float)
 
 
-# .........................................................
-# Performance Comparison
+    # 1. Steady State
+    klSteadyState = (aalpha/((1/bbeta) - (1-ddelta)))**(1/(aalpha-1))
+    qqq1= klSteadyState**aalpha - ddelta*klSteadyState
+    qqq2 = (1-aalpha)*(klSteadyState**aalpha)
+    lSteadyState = (qqq2/qqq1)**(1/2)
+    capitalSteadyState = klSteadyState*lSteadyState
+    outputSteadyState = (klSteadyState**aalpha)*lSteadyState
+    consumptionSteadyState = lSteadyState*qqq1
 
-# Write the compute time function that takes as input function to compute
-#       to compute the time-to-compute
-dat_n= []
-dat_t_mid = []
-dat_t_trap = []
-dat_t_simpson = []
-dat_t_monte = []
-dat_y_mid = []
-dat_y_trap = []
-dat_y_simpson = []
-dat_y_monte = []
+    print("Output = ", outputSteadyState, " Capital = ", capitalSteadyState, " Consumption = ", consumptionSteadyState) 
 
 
-def getPerformance(f, a, b, n, rrho, llambda):
-    start = time.time()
-    estval = f(a, b, n, rrho, llambda)
-    end = time.time()
-    return (end-start, estval)
+    # 2. VFI with a fixed grid
+    def getLabor(cc, kk, zz, aalpha):
+        return (np.exp(zz)*(kk**aalpha)/cc)**(1/(1+aalpha))
 
-# Test
-t, val = getPerformance(integrateMonteCarlo, a, b, n, rrho, llambda)
+    vGridCapital = np.arange(0.1*capitalSteadyState,1.9*capitalSteadyState,(1.9*capitalSteadyState-0.1*capitalSteadyState)/nk)
+    nGridCapital = len(vGridCapital)
+    nGridProductivity = len(vProductivity)
 
-NN = 1e6
-curr_n = 1e2
-dt = 1e1
-loop_st = time.time()
-while True:
-    n = int(curr_n)
-    t_mid, val_mid = getPerformance(integrateMidpoint, a, b, n, rrho, llambda)
-    t_trap, val_trap = getPerformance(integrateTrapezoid, a, b, n, rrho, llambda)
-    t_simp, val_simp = getPerformance(integrateSimpson, a, b, n, rrho, llambda)
-    t_monte, val_monte = getPerformance(integrateMonteCarlo, a, b, n, rrho, llambda)
+    # mOutput           = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+    mValueFunction    = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+    mValueFunctionNew = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+    mPolicyFunction   = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+    expectedValueFunction = np.zeros((nGridCapital,nGridProductivity),dtype=float)
 
-    dat_n.append(curr_n)
+    # for nProductivity in range(nGridProductivity):
+    #     mOutput[:,nProductivity] = np.exp(vProductivity[nProductivity])*(vGridCapital**aalpha)
 
-    dat_t_mid.append(t_mid)
-    dat_t_trap.append(t_trap)
-    dat_t_simpson.append(t_simp)
-    dat_t_monte.append(t_monte)    
+    maxDifference = 10.0
+    # tolerance = 1e-2
+    iteration = 0
+    iter = 1
+    while(maxDifference > tolerance):
+        expectedValueFunction = np.dot(mValueFunction,mTransition.T)
+        for nProductivity in range(nGridProductivity):
+            # We start from previous choice (monotonicity of policy function)
+            gridCapitalNextPeriod = 0
+            for nCapital in range(nGridCapital):
+                valueHighSoFar = -100000.0
+                capitalChoice  = vGridCapital[0]
+                if iteration % 10 == 0:
+                    for nCapitalNextPeriod in range(gridCapitalNextPeriod, nGridCapital):
+                        kprime = vGridCapital[nCapitalNextPeriod]
+                        zz = vProductivity[nProductivity]
+                        kk = vGridCapital[nCapital]
 
-    dat_y_mid.append(val_mid)
-    dat_y_trap.append(val_trap)
-    dat_y_simpson.append(val_simp)
-    dat_y_monte.append(val_monte)
+                        objfun = lambda cons: -kprime + np.exp(zz)*(kk**aalpha)*(getLabor(cons, kk, zz, aalpha)**(1-aalpha)) - cons + (1-ddelta)*kk
+                        consuption_initialguess = 0.5
+                        consumption = fsolve(objfun, consuption_initialguess)
+                        labor = getLabor(consumption, kk, zz, aalpha)
 
-    curr_n = curr_n*dt
+                        expectedValueFunction = np.dot(mTransition[nProductivity,:],mValueFunction[nCapitalNextPeriod,:])
+                        valueProvisional = (1-bbeta)*(math.log(consumption) - (labor**2)/2) + bbeta*expectedValueFunction
+                        if  valueProvisional>valueHighSoFar:
+                            valueHighSoFar = valueProvisional
+                            capitalChoice = vGridCapital[nCapitalNextPeriod]
+                            gridCapitalNextPeriod = nCapitalNextPeriod
+                        else:
+                            break
+                    mValueFunctionNew[nCapital,nProductivity] = valueHighSoFar
+                    mPolicyFunction[nCapital,nProductivity]   = capitalChoice
+                else:
+                    kprime = mPolicyFunction[nCapital,nProductivity]
+                    for ik in range(nGridCapital):
+                        if vGridCapital[ik] == kprime:
+                            break
 
-    loop_et = time.time()
+                    zz = vProductivity[nProductivity]
+                    kk = vGridCapital[nCapital]
 
-    print(curr_n)
-    if curr_n > NN or loop_et - loop_st > 20:
-        break
+                    objfun = lambda cons: -kprime + np.exp(zz)*(kk**aalpha)*(getLabor(cons, kk, zz, aalpha)**(1-aalpha)) - cons + (1-ddelta)*kk
+                    consuption_initialguess = 0.5
+                    consumption = fsolve(objfun, consuption_initialguess)
+                    labor = getLabor(consumption, kk, zz, aalpha)
 
-plt.plot(dat_n, dat_t_mid)
-plt.plot(dat_n, dat_t_trap)
-plt.plot(dat_n, dat_t_simpson)
-plt.plot(dat_n, dat_t_monte)
-plt.xscale('log')
-plt.title('Peformance Comparison')
-plt.ylabel('Compute Time (seconds)')
-plt.xlabel('N')
-plt.legend(['Midpoint', 'Trapezoid', 'Simpson', 'Monte Carlo'])
-plt.show()
+                    expectedValueFunction = np.dot(mTransition[nProductivity,:],mValueFunction[ik,:])
+                    valueProvisional = (1-bbeta)*(math.log(consumption) - (labor**2)/2) + bbeta*expectedValueFunction
 
-plt.plot(dat_n, dat_y_mid)
-plt.plot(dat_n, dat_y_trap)
-plt.plot(dat_n, dat_y_simpson)
-plt.plot(dat_n, dat_y_monte)
-plt.xscale('log')
-plt.title('Peformance Comparison')
-plt.ylabel('Numerical Estimates (seconds)')
-plt.xlabel('N')
-plt.legend(['Midpoint', 'Trapezoid', 'Simpson', 'Monte Carlo'])
-plt.show()
+                    mValueFunctionNew[nCapital,nProductivity] = valueProvisional
+
+        maxDifference = (abs(mValueFunctionNew-mValueFunction)).max()
+
+        mValueFunction    = mValueFunctionNew
+        mValueFunctionNew = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+
+        iteration += 1
+        if(iteration%10 == 0 or iteration == 1):
+            print(" Iteration = ", iteration, ", Sup Diff = ", maxDifference)
+            
+    print(" Iteration = ", iteration, ", Sup Duff = ", maxDifference)
+    print(" ")
+
+    t2=time.time()
+    print("Elapse time = is ", t2-t1)
+
+    return mValueFunction, mPolicyFunction, t2-t1
 
 
-# =========================================================
-# Problem 3: Optimization
-# =========================================================
-# Optimize min_{x,y} 100*(y-x^2)^2 + (1-x)^2
-# using (1) Newton-Raphson, (2) BFGS, (3) steepest descent, (4) conjugate descent
-from sympy.abc import x, y
-from sympy import ordered, Matrix, hessian
-import numdifftools as nd
 
-# Define objective function
-eq = 100*((y-(x**2))**2) + (1-x)**2
-v = list(ordered(eq.free_symbols)); v
+# RUN VFI
+# mValueFunction_vfi, mPolicyFunction_vfi, te_vfi = runVFI(nk = 250, tolerance = 1e-5)
+# mValueFunction_acc, mPolicyFunction_acc, te_acc = runVFI_accelerator(nk = 250, tolerance = 1e-5)
 
-# Define gradient function
-gradient = lambda f, v: Matrix([f]).jacobian(v)
 
-# Symbolic gradient and hessian
-grad_obj = gradient(eq, v)
-hess_obj = hessian(eq, v)
+nk = 250
 
-def getSubstitued(symf, evalx, evaly):
-    subx = symf.subs(x, evalx)
-    subxy = subx.subs(y, evaly)
-    return subxy
+aalpha = 1.0/3.0
+bbeta  = 0.97
+ddelta = 0.10
 
-# .........................................................
-# (1) Newton-Raphson
+vProductivity = np.array([-0.05, 0, 0.05],float)
+mTransition   = np.array([[0.97, 0.03, 0.00],
+                [0.01, 0.98, 0.01],
+                [0.00, 0.03, 0.97]],float)
 
-# Define Newton-Raphson optimizer (symbolic)
-def minimizeNewtonRaphson(f, df, ddf, x0, tol):
-    df_x0 = getSubstitued(df, x0[0,0], x0[1,0])
-    inv_ddf_x0 = getSubstitued(ddf.inv(), x0[0,0], x0[1,0])
-    # inv_ddf_x0 = np.linalg.inv(ddf_x0)
+klSteadyState = (aalpha/((1/bbeta) - (1-ddelta)))**(1/(aalpha-1))
+qqq1= klSteadyState**aalpha - ddelta*klSteadyState
+qqq2 = (1-aalpha)*(klSteadyState**aalpha)
+lSteadyState = (qqq2/qqq1)**(1/2)
+capitalSteadyState = klSteadyState*lSteadyState
+outputSteadyState = (klSteadyState**aalpha)*lSteadyState
+consumptionSteadyState = lSteadyState*qqq1
 
-    df_x0 = np.array(df_x0).astype(np.float128)
-    inv_ddf_x0 = np.array(inv_ddf_x0).astype(np.float128)
+vGridCapital = np.arange(0.1*capitalSteadyState,1.9*capitalSteadyState,(1.9*capitalSteadyState-0.1*capitalSteadyState)/nk)
+nGridCapital = len(vGridCapital)
+nGridProductivity = len(vProductivity)
 
-    x1 = x0 - np.matmul(inv_ddf_x0, np.transpose(df_x0))
-    # print(x1)
-    
-    if abs(x1[0,0] - x0[0,0]) < tol and abs(x1[1,0] - x0[1,0]) < tol:
-        return x0
+# plt.plot(vGridCapital, mPolicyFunction_vfi[:,0], label="Low z")
+# plt.plot(vGridCapital, mPolicyFunction_vfi[:,1], label="Medium z")
+# plt.plot(vGridCapital, mPolicyFunction_vfi[:,2], label="High z")
+# plt.xlabel("k")
+# plt.ylabel("k'")
+# plt.legend()
+# plt.title("Policy Function: VFI over Finite Grid")
+# plt.savefig("p2_vfi_policy.png")
+# plt.close()
+
+# plt.plot(vGridCapital, mPolicyFunction_acc[:,0], label="Low z")
+# plt.plot(vGridCapital, mPolicyFunction_acc[:,1], label="Medium z")
+# plt.plot(vGridCapital, mPolicyFunction_acc[:,2], label="High z")
+# plt.xlabel("k")
+# plt.ylabel("k'")
+# plt.legend()
+# plt.title("Policy Function: VFI over Finite Grid (accelerator)")
+# plt.savefig("p3_vfiacc_policy.png")
+# plt.close()
+
+# plt.plot(vGridCapital, mValueFunction_vfi[:,0], label="Low z")
+# plt.plot(vGridCapital, mValueFunction_vfi[:,1], label="Medium z")
+# plt.plot(vGridCapital, mValueFunction_vfi[:,2], label="High z")
+# plt.xlabel("k")
+# plt.ylabel("V")
+# plt.legend()
+# plt.title("Value Function: VFI over Finite Grid")
+# plt.savefig("p2_vfi_value.png")
+# plt.close()
+
+# plt.plot(vGridCapital, mValueFunction_acc[:,0], label="Low z")
+# plt.plot(vGridCapital, mValueFunction_acc[:,1], label="Medium z")
+# plt.plot(vGridCapital, mValueFunction_acc[:,2], label="High z")
+# plt.xlabel("k")
+# plt.ylabel("V")
+# plt.legend()
+# plt.title("Value Function: VFI over Finite Grid (accelerator)")
+# plt.savefig("p3_vfiacc_value.png")
+# plt.close()
+
+
+# ===========================================================================================
+# Problem 4: Multigrid
+def runVFI_multigrid(tolerance, multigrid = [1e2, 1e3, 1e4]):
+
+    t1=time.time()
+
+    aalpha = 1.0/3.0
+    bbeta  = 0.97
+    ddelta = 0.10
+
+    vProductivity = np.array([-0.05, 0, 0.05],float)
+    mTransition   = np.array([[0.97, 0.03, 0.00],
+                    [0.01, 0.98, 0.01],
+                    [0.00, 0.03, 0.97]],float)
+
+
+    # 1. Steady State
+    klSteadyState = (aalpha/((1/bbeta) - (1-ddelta)))**(1/(aalpha-1))
+    qqq1= klSteadyState**aalpha - ddelta*klSteadyState
+    qqq2 = (1-aalpha)*(klSteadyState**aalpha)
+    lSteadyState = (qqq2/qqq1)**(1/2)
+    capitalSteadyState = klSteadyState*lSteadyState
+    outputSteadyState = (klSteadyState**aalpha)*lSteadyState
+    consumptionSteadyState = lSteadyState*qqq1
+
+    print("Output = ", outputSteadyState, " Capital = ", capitalSteadyState, " Consumption = ", consumptionSteadyState) 
+
+
+    # 2. VFI with a fixed grid
+    def getLabor(cc, kk, zz, aalpha):
+        return ((1-aalpha)*np.exp(zz)*(kk**aalpha)/cc)**(1/(1+aalpha)) # (1-alpha) omitted previously
+
+    isInit = True
+    for coarseness in multigrid:
+        if isInit:
+            isInit = False
+            vGridCapital = np.arange(0.1*capitalSteadyState,1.9*capitalSteadyState,(1.9*capitalSteadyState-0.1*capitalSteadyState)/coarseness)
+            nGridCapital = len(vGridCapital)
+            nGridProductivity = len(vProductivity)
+            mValueFunction    = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+            mValueFunctionNew = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+            mPolicyFunction   = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+            expectedValueFunction = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+        else:
+            prevFineness, _ = mPolicyFunction_saved.shape
+            vGridCapital = np.arange(0.1*capitalSteadyState,1.9*capitalSteadyState,(1.9*capitalSteadyState-0.1*capitalSteadyState)/coarseness)
+            nGridCapital = len(vGridCapital)
+            nGridProductivity = len(vProductivity)
+            mValueFunction    = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+            mValueFunctionNew = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+            mPolicyFunction   = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+            expectedValueFunction = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+            curridx_nGridCapitalSaved = 0
+            for ik in range(nGridCapital):
+                if curridx_nGridCapitalSaved >= prevFineness-1:
+                    mValueFunction[ik,:] = mValueFunction_saved[prevFineness-1,:]
+                    mValueFunctionNew[ik,:] = mValueFunction_saved[prevFineness-1,:]
+                    mPolicyFunction[ik,:]   = mPolicyFunction_saved[prevFineness-1,:]
+                elif vGridCapital[ik] < vGridCapital_saved[curridx_nGridCapitalSaved+1]:
+                    mValueFunction[ik,:] = mValueFunction_saved[curridx_nGridCapitalSaved,:]
+                    mValueFunctionNew[ik,:] = mValueFunction_saved[curridx_nGridCapitalSaved,:]
+                    mPolicyFunction[ik,:]   = mPolicyFunction_saved[curridx_nGridCapitalSaved,:]
+                else:
+                    curridx_nGridCapitalSaved += 1
+                    mValueFunction[ik,:] = mValueFunction_saved[curridx_nGridCapitalSaved,:]
+                    mValueFunctionNew[ik,:] = mValueFunction_saved[curridx_nGridCapitalSaved,:]
+                    mPolicyFunction[ik,:]   = mPolicyFunction_saved[curridx_nGridCapitalSaved,:]
+
+        # for nProductivity in range(nGridProductivity):
+        #     mOutput[:,nProductivity] = np.exp(vProductivity[nProductivity])*(vGridCapital**aalpha)
+
+        maxDifference = 10.0
+        # tolerance = 1e-2
+        iteration = 0
+        iter = 1
+        while(maxDifference > tolerance):
+            expectedValueFunction = np.dot(mValueFunction,mTransition.T)
+            for nProductivity in range(nGridProductivity):
+                # We start from previous choice (monotonicity of policy function)
+                gridCapitalNextPeriod = 0
+                for nCapital in range(nGridCapital):
+                    valueHighSoFar = -100000.0
+                    capitalChoice  = vGridCapital[0]
+                    if iteration % 10 == 0:
+                        for nCapitalNextPeriod in range(gridCapitalNextPeriod, nGridCapital):
+                            kprime = vGridCapital[nCapitalNextPeriod]
+                            zz = vProductivity[nProductivity]
+                            kk = vGridCapital[nCapital]
+
+                            objfun = lambda cons: -kprime + np.exp(zz)*(kk**aalpha)*(getLabor(cons, kk, zz, aalpha)**(1-aalpha)) - cons + (1-ddelta)*kk
+                            consuption_initialguess = 0.5
+                            consumption = fsolve(objfun, consuption_initialguess)
+                            labor = getLabor(consumption, kk, zz, aalpha)
+
+                            expectedValueFunction = np.dot(mTransition[nProductivity,:],mValueFunction[nCapitalNextPeriod,:])
+                            valueProvisional = (1-bbeta)*(math.log(consumption) - (labor**2)/2) + bbeta*expectedValueFunction
+                            if  valueProvisional>valueHighSoFar:
+                                valueHighSoFar = valueProvisional
+                                capitalChoice = vGridCapital[nCapitalNextPeriod]
+                                gridCapitalNextPeriod = nCapitalNextPeriod
+                            else:
+                                break
+                        mValueFunctionNew[nCapital,nProductivity] = valueHighSoFar
+                        mPolicyFunction[nCapital,nProductivity]   = capitalChoice
+                    else:
+                        kprime = mPolicyFunction[nCapital,nProductivity]
+                        for ik in range(nGridCapital):
+                            if vGridCapital[ik] == kprime:
+                                break
+
+                        zz = vProductivity[nProductivity]
+                        kk = vGridCapital[nCapital]
+
+                        objfun = lambda cons: -kprime + np.exp(zz)*(kk**aalpha)*(getLabor(cons, kk, zz, aalpha)**(1-aalpha)) - cons + (1-ddelta)*kk
+                        consuption_initialguess = 0.5
+                        consumption = fsolve(objfun, consuption_initialguess)
+                        labor = getLabor(consumption, kk, zz, aalpha)
+
+                        expectedValueFunction = np.dot(mTransition[nProductivity,:],mValueFunction[ik,:])
+                        valueProvisional = (1-bbeta)*(math.log(consumption) - (labor**2)/2) + bbeta*expectedValueFunction
+
+                        mValueFunctionNew[nCapital,nProductivity] = valueProvisional
+
+            maxDifference = (abs(mValueFunctionNew-mValueFunction)).max()
+
+            mValueFunction    = mValueFunctionNew
+            mValueFunctionNew = np.zeros((nGridCapital,nGridProductivity),dtype=float)
+
+            iteration += 1
+            if(iteration%10 == 0 or iteration == 1):
+                print(" Iteration = ", iteration, ", Sup Diff = ", maxDifference)
+            
+            mValueFunction_saved = mValueFunction
+            mPolicyFunction_saved = mPolicyFunction
+            vGridCapital_saved = vGridCapital
+                
+        print(" Iteration = ", iteration, ", Sup Duff = ", maxDifference)
+        print(" ")
+        t2=time.time()
+        print("Elapse time = is ", t2-t1)
+
+    return mValueFunction, mPolicyFunction, t2-t1
+
+# RUN
+runVFI(nk = 1e3, tolerance = 1e-3)
+runVFI_accelerator(nk = 1e3, tolerance = 1e-3)
+mValueFunction_mg, mPolicyFunction_mg, te_mg = runVFI_multigrid(tolerance = 1e-3, multigrid=[1e2, 1e3])
+
+vGridCapital = np.arange(0.1*capitalSteadyState,1.9*capitalSteadyState,(1.9*capitalSteadyState-0.1*capitalSteadyState)/1e3)
+plt.plot(vGridCapital, mPolicyFunction_mg[:,0], label="Low z")
+plt.plot(vGridCapital, mPolicyFunction_mg[:,1], label="Medium z")
+plt.plot(vGridCapital, mPolicyFunction_mg[:,2], label="High z")
+plt.xlabel("k")
+plt.ylabel("k'")
+plt.legend()
+plt.title("Policy Function: VFI Multigrid")
+plt.savefig("p4_vfimg_policy.png")
+plt.close()
+
+plt.plot(vGridCapital, mValueFunction_mg[:,0], label="Low z")
+plt.plot(vGridCapital, mValueFunction_mg[:,1], label="Medium z")
+plt.plot(vGridCapital, mValueFunction_mg[:,2], label="High z")
+plt.xlabel("k")
+plt.ylabel("V")
+plt.legend()
+plt.title("Value Function: VFI Multigrid")
+plt.savefig("p4_vfimg_value.png")
+plt.close()
+
+# ===========================================================================================
+# Problem 5: Chebychev
+# (1) The Euler equation
+# U_c(t) = \beta E_t [U_c(t+1) (\alpha e^{z_{t+1}} k_{t+1}^{\alpha-a} l(k_{t+1}, z_{t+1})^\alpha + (1-\delta) ) ]
+
+# (2) The consumption-labor FOC
+# l(k,z) = ((1-\alpha) (1/c) e^z k^\alpha  )^{1/(1+\alpha)}
+def getLabor(cc, kk, zz, aalpha):
+    return ((1-aalpha)*np.exp(zz)*(kk**aalpha)/cc)**(1/(1+aalpha)) # (1-alpha) omitted previously
+
+def getConsumption(kk, zz, kprime, param):
+    aalpha = param["aalpha"]
+    ddelta = param["ddelta"]
+    objfun = lambda cons: -kprime + np.exp(zz)*(kk**aalpha)*(getLabor(cons, kk, zz, aalpha)**(1-aalpha)) - cons + (1-ddelta)*kk
+    consuption_initialguess = 0.5
+    consumption = fsolve(objfun, consuption_initialguess)
+    return consumption
+
+def kprime(kk, zz, ttheta, param):
+        ttheta = np.reshape(ttheta, param["ttheta_shape"])
+        idx_zz = (zz == param["vProductivity"])
+        currtheta = ttheta[idx_zz,:]
+        evalapprox = np.polynomial.chebyshev.chebval(kk, currtheta[0,:])
+        if evalapprox <= 0:
+            evalapprox = 1e-6
+        return evalapprox
+
+def getPsi(k, idx_ki, kfegrid):
+    kim1 = kfegrid[idx_ki-1]
+    kip1 = kfegrid[idx_ki+1]
+    ki = kfegrid[idx_ki]
+    if k >= kim1 and k <= ki:
+        res = (k-kim1)/(ki-kim1)
+    elif k >= ki and k<= kip1:
+        res = (kip1-k)/(kip1-ki)
     else:
-        return minimizeNewtonRaphson(f, df, ddf, x1, tol)
+        res = 0
+    return res
 
-x0 = np.array([[-100], [-100]])
-tol = 1e-16
-print(minimizeNewtonRaphson(eq, grad_obj, hess_obj, x0, tol))
+def kprime_fem(kk, zz, ttheta, param):
+        kfegrid = param["kfegrid"]
+        ttheta = np.reshape(ttheta, param["ttheta_shape"])
+        idx_zz = (zz == param["vProductivity"])
+        currtheta = ttheta[idx_zz,:]
 
+        sum = 0
+        for i in range(currtheta.size-2):
+            currPsi = getPsi(kk, i+1, kfegrid)
+            sum += currtheta[0,i+1] * currPsi
 
-# Define Newton-Raphson optimizer (finite difference)
-def minimizeNewtonRaphson_fd(f, df, ddf, x0, tol):
-    """
-    Minimize the objective function f using the Newton-Raphson method
+        # if evalapprox <= 0:
+        #     evalapprox = 1e-6
+        return sum
 
-    :param f: the objective function
-    :param df: the gradient of the objective (nd object)
-    :param ddf: the hessian of the objective (nd object)
-    :param x0: the initial point
-    :param tol: tolerance
-    :return: numerical minimizer
-    """
-    df_x0 = df(x0)
-    ddf_x0 = ddf(x0)
-    inv_ddf_x0 = np.linalg.inv(ddf_x0)
+# nz = 3
+# kfegrid = np.array([0.2, 0.25, 1, 1.2, 1.5, 2])
+# ttheta = np.zeros((nz, kfegrid.size))
+# idx_zz = (zz == param["vProductivity"])
+# currtheta = ttheta[idx_zz,:]
+# left, right = -1, 0
+# for ife in range(kfegrid.size+1):
+#     if kk < kfegrid[ife]:
+#         break
+#     else:
+#         if left == kfegrid.size - 1: # last index
+#             break
+#         else:
+#             left += 1
+#             right += 1
+# if left == -1:
+#     val = currtheta[0]
+# elif left == kfegrid.size - 1:
+#     val = currtheta[left]
+# else:
+#     val = ((kk-leftval)/(rightval-leftval))*currtheta[left] + ((rightval-kk)/(rightval-leftval))*currtheta[right]
 
-    x1 = x0 - np.transpose(np.matmul(inv_ddf_x0, np.transpose(df_x0)))
-    # print(x1)
-    
-    if abs(x1[0] - x0[0]) < tol and abs(x1[1] - x0[1]) < tol:
-        return x0
+def computeEEErr(kk, zz, ttheta, param):
+    aalpha = param["aalpha"]
+    ddelta = param["ddelta"]
+    vProductivity = param["vProductivity"]
+    mTransition = param["mTransition"]
+
+    if param["isFEM"]:
+        kkprime = kprime_fem(kk, zz, ttheta, param)
     else:
-        return minimizeNewtonRaphson_fd(f, df, ddf, x1, tol)
-
-objFct = lambda x : 100*((x[1]-(x[0]**2))**2) + (1.-x[0])**2
-grad_objFct = nd.Gradient(objFct)
-hess_objFct = nd.Hessian(objFct)
-x0 = [-1e3, -1e3]
-tol = 1e-16
-print(minimizeNewtonRaphson_fd(objFct, grad_objFct, hess_objFct, x0, tol))
-
-
-# .........................................................
-# (2) BFGS
-def minimize_BFGS(objFct, grad_objFct, hess_objFct, x0, tol):
-    """
-    Minimize the objective function f using the BFGS method
-
-    :param f: the objective function
-    :param df: the gradient of the objective (nd object)
-    :param ddf: the hessian of the objective (nd object)
-    :param x0: the initial point
-    :param tol: tolerance
-    :return: numerical minimizer
-    """
-    g0 = grad_objFct(x0)
-    Q0 = hess_objFct(x0)
-    H0 = np.linalg.inv(Q0)
-    while True:
-        x1 = x0.reshape(2,1) - (H0 @ g0.reshape(2,1))
-        p0 = x1.reshape(2,1) - x0.reshape(2,1)
-        g1 = grad_objFct(x1)
-        q0 = g1.reshape(2,1) - g0.reshape(2,1)
-        H1 = H0 + (1 + (q0.T@H0@q0)/(p0.T@q0))*((p0@p0.T)/(p0.T@q0)) - ((p0@q0.T@H0)+ (H0@q0@p0.T))/(q0.T@p0)
-        if abs(x1[0] - x0[0]) < tol and abs(x1[1] - x0[1]) < tol:
-            break
-        else:
-            x0, H0, g0 = x1, H1, g1
-    return x1
-
-objFct = lambda x : 100*((x[1]-(x[0]**2))**2) + (1.-x[0])**2
-grad_objFct = nd.Gradient(objFct)
-hess_objFct = nd.Hessian(objFct)
-x0 = np.array([-2,2])
-tol = 1e-12
-print(minimize_BFGS(objFct, grad_objFct, hess_objFct, x0, tol))
-
-# .........................................................
-# (3) Steepest descent
-from scipy.optimize import minimize
-
-def minimizeSD(objFct, grad_objFct, hess_objFct, x0, tol):
-    """
-    Minimize the objective function f using the steepest descent method
-
-    :param f: the objective function
-    :param df: the gradient of the objective (nd object)
-    :param ddf: the hessian of the objective (nd object)
-    :param x0: the initial point
-    :param tol: tolerance
-    :return: numerical minimizer
-    """
-    while True:
-        d0 = -grad_objFct(x0)
-
-        innerObjFct = lambda a : objFct(x0 + (a*d0))
-
-        a0 = np.array([0])
-        aalpha0 = minimize(innerObjFct, a0, method='BFGS')
-        aalpha0 = aalpha0.x
-
-        x1 = x0 + (aalpha0*d0)
-        if abs(x1[0] - x0[0]) < tol and abs(x1[1] - x0[1]) < tol:
-            break
-        else:
-            x0 = x1
-    return x1
-
-objFct = lambda x : 100*((x[1]-(x[0]**2))**2) + (1.-x[0])**2
-grad_objFct = nd.Gradient(objFct)
-x0 = np.array([-2,2])
-tol = 1e-6
-print(minimizeSD(objFct, grad_objFct, hess_objFct, x0, tol))
-
-
-# .........................................................
-# (4) Conjugate descent
-objFct = lambda x : 100*((x[1]-(x[0]**2))**2) + (1.-x[0])**2
-grad_objFct = nd.Gradient(objFct)
-hess_objFct = nd.Hessian(objFct)
-
-def minimizeCD(objFct, grad_objFct, hess_objFct, x0, tol):
-    """
-    Minimize the objective function f using the conjugate descent method
-
-    :param f: the objective function
-    :param df: the gradient of the objective (nd object)
-    :param ddf: the hessian of the objective (nd object)
-    :param x0: the initial point
-    :param tol: tolerance
-    :return: numerical minimizer
-    """
-    r0 = -grad_objFct(x0)
-    d0 = r0
-    while True:
-        innerObjFct = lambda a : objFct(x0 + (a*d0))
-
-        a0 = np.array([0])
-        aalpha0 = minimize(innerObjFct, a0, method='BFGS')
-        aalpha0 = aalpha0.x
-
-        x1 = x0 + (aalpha0*d0)
-        r1 = -grad_objFct(x1)
-        beta1 = (r1.reshape(2,1).T @ r1.reshape(2,1))/(r0.reshape(2,1).T @ r0.reshape(2,1))
-        beta1 = beta1[0,0]
-        d1 = r1 + beta1*d0
-
-        if abs(x1[0] - x0[0]) < tol and abs(x1[1] - x0[1]) < tol:
-            break
-        else:
-            x0, d0, r0 = x1, d1, r1
-    return x1
-
-x0 = np.array([-2,2])
-tol = 1e-6
-print(minimizeCD(objFct, grad_objFct, hess_objFct, x0, tol))
-
-# Performance comparison
-dat_tol= []
-dat_t_newton = []
-dat_t_bfgs = []
-dat_t_sd = []
-dat_t_cd = []
-dat_y1_newton = []
-dat_y2_newton = []
-dat_y1_bfgs = []
-dat_y2_bfgs = []
-dat_y1_sd = []
-dat_y2_sd = []
-dat_y1_cd = []
-dat_y2_cd = []
-
-def getPerformance3(f, objFct, grad_objFct, hess_objFct, x0, tol):
-    start = time.time()
-    estval = f(objFct, grad_objFct, hess_objFct, x0, tol)
-    end = time.time()
-    return (end-start, estval)
-
-# Test
-objFct = lambda x : 100*((x[1]-(x[0]**2))**2) + (1.-x[0])**2
-grad_objFct = nd.Gradient(objFct)
-hess_objFct = nd.Hessian(objFct)
-x0 = np.array([-2,2])
-tol = 1e-12
-t, val = getPerformance3(minimize_BFGS, objFct, grad_objFct, hess_objFct, x0, tol)
-
-max_tol = 1e-10
-curr_tol = 1e-1
-dt = 1e-1
-loop_st = time.time()
-while True:
-    tol = curr_tol
-    t_newton, val_newton = getPerformance3(minimizeNewtonRaphson_fd, objFct, grad_objFct, hess_objFct, x0, tol)
-    t_bfgs, val_bfgs = getPerformance3(minimize_BFGS, objFct, grad_objFct, hess_objFct, x0, tol)
-    t_sd, val_sd = getPerformance3(minimizeSD, objFct, grad_objFct, hess_objFct, x0, tol)
-    t_cd, val_cd = getPerformance3(minimizeCD, objFct, grad_objFct, hess_objFct, x0, tol)
-
-    dat_tol.append(curr_tol)
-
-    dat_t_newton.append(t_newton)
-    dat_t_bfgs.append(t_bfgs)
-    dat_t_sd.append(t_sd)
-    dat_t_cd.append(t_cd)    
-
-    dat_y1_newton.append(val_newton[0])
-    dat_y2_newton.append(val_newton[1])
-    dat_y1_bfgs.append(val_bfgs[0,0])
-    dat_y2_bfgs.append(val_bfgs[1,0])
-    dat_y1_sd.append(val_sd[0])
-    dat_y2_sd.append(val_sd[1])
-    dat_y1_cd.append(val_cd[0])
-    dat_y2_cd.append(val_cd[1])
-    
-    curr_tol = curr_tol*dt
-
-    loop_et = time.time()
-
-    if curr_tol <= max_tol:
-        break
-
-plt.plot(dat_tol, dat_t_newton)
-plt.plot(dat_tol, dat_t_bfgs)
-plt.plot(dat_tol, dat_t_sd)
-plt.plot(dat_tol, dat_t_cd)
-plt.xscale('log')
-plt.title('Peformance Comparison')
-plt.ylabel('Compute Time (seconds)')
-plt.xlabel('Tolerance')
-plt.legend(['Newton-Raphson', 'BFGS', 'Steepest Descent', 'Conjugate Descent'])
-plt.show()
-
-plt.plot(dat_tol, dat_y1_newton)
-plt.plot(dat_tol, dat_y1_bfgs)
-plt.plot(dat_tol, dat_y1_sd)
-plt.plot(dat_tol, dat_y1_cd)
-plt.xscale('log')
-plt.title('Peformance Comparison')
-plt.ylabel('Numerical Estimates')
-plt.xlabel('Tolerance')
-plt.legend(['Newton-Raphson', 'BFGS', 'Steepest Descent', 'Conjugate Descent'])
-plt.show()
-
-
-# =========================================================
-# Problem 4: Pareto Efficient Allocations
-# =========================================================
-def util_i(x, aalpha, oomega, m, n):
-    """
-    Computes the agent i's utility given model parameters
-
-    :param x: a vector of allocations
-    :param aalpha: a vector of goods weights
-    :param oomega: a vector of elasticities across goods
-    :param m: number of goods
-    :param n: nubmer of individuals
-    :return: utility of an agent
-    """
-    sum_util = 0
-    for i in range(m):
-        curr_util = aalpha[i]*((x[i]**(1+oomega[i]))/(1+oomega[i]))
-        sum_util = sum_util + curr_util
-    return sum_util
-
-# Test
-m, n = 3, 3 # m = number of goods; n = number of agents
-x_i = np.array([0.2, 0.2, 0.6])
-aalpha = np.array([0.8, 0.1, 0.1]) # common acrross agents
-oomega_i = np.array([-0.3, -0.4, -0.3])
-
-util_i(x_i, aalpha, oomega_i, m, n)
-
-def  util_social(X, Aalpha, Oomega, m, n, llambda):
-    """
-    Computes the social utility
-
-    :param X: a matrix of allocations (j=hh,i=good)
-    :param Aalpha: a matrix of goods weights
-    :param Oomega: a matrix of elasticities across goods
-    :param m: number of goods
-    :param n: nubmer of individuals
-    :param llambda: a vector of social weights
-    :return: social utility
-    """
-    sum_util_social = 0
-    for j in range(n):
-        curr_x_i = X[j,:]
-        curr_aalpha_i = Aalpha[j,:]
-        curr_oomega_i = Oomega[j,:]
-        curr_util_i = llambda[j]*util_i(curr_x_i, curr_aalpha_i, curr_oomega_i, m, n)
-        sum_util_social = sum_util_social + curr_util_i
-        # print(curr_util_i)
-    return sum_util_social
-
-# Test
-X = np.array([[0.2, 0.2, 0.6], [0.2, 0.2, 0.6], [0.8, 0.2, 0.6]])
-Aalpha = np.array([[0.8, 0.1, 0.1], [0.8, 0.1, 0.1], [0.8, 0.1, 0.1]])
-Oomega = np.array([[-0.3, -0.4, -0.3], [-0.3, -0.4, -0.3], [-0.3, -0.4, -0.3]])
-llambda = np.array([0.1, 0.3, 0.6])
-
-util_social(X, Aalpha, Oomega, m, n, llambda)
-
-# ................
-# Symmetric Case I
-# ................
-
-# X = np.array([[0.2, 0.2, 0.6], [0.2, 0.2, 0.6], [0.8, 0.2, 0.6]])
-Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
-# Oomega = np.array([[-0.3, -0.9, -0.3], [-0.3, -0.9, -0.3], [-0.3, -0.9, -0.3]])
-Oomega = np.array([[-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5]])
-llambda = np.array([0.5, 0.3, 0.2])
-Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
-
-def pareto_obj(X_vec, llambda_vec, Aalpha, Oomega, Endow, m, n):
-    """
-    Substitutes in the constraints so that X_vec is of dimension (n-1) by m
-    """
-    X = X_vec.reshape(n-1,m)
-    X_sum = np.sum(X, axis=0)
-    endow_sum = np.sum(Endow, axis=0)
-    X = np.append(X, [endow_sum-X_sum], axis=0)
-    llambda = llambda_vec
-    return util_social(X, Aalpha, Oomega, m, n, llambda)
-
-# Test
-X = np.array([[0.2, 0.2, 0.6], [0.2, 0.2, 0.6]])
-X_vec = X.reshape(m*(n-1),)
-
-llambda_vec = llambda
--pareto_obj(X_vec, llambda_vec, Aalpha, Oomega, Endow, m, n)
-
-obj = lambda x : -pareto_obj(x, llambda_vec, Aalpha, Oomega, Endow, m, n)
-
-x0 = np.ones((m*(n-1),))*.5
-res = minimize(obj, x0, method='BFGS')
-
-Xres_vec = res.x
-Xres = Xres_vec.reshape(n-1,m)
-Xres_sum = np.sum(Xres, axis=0)
-endow_sum = np.sum(Endow, axis=0)
-Xres = np.append(Xres, [endow_sum- Xres_sum], axis=0) # pareto optimal allocation
-Xres
-
-# ..................
-# Asymmetric Case II
-# ..................
-
-# X = np.array([[0.2, 0.2, 0.6], [0.2, 0.2, 0.6], [0.8, 0.2, 0.6]])
-Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
-# Oomega = np.array([[-0.6, -0.5, -0.4], [-0.5, -0.5, -0.5], [-0.4, -0.5, -0.6]])
-Oomega = np.array([[-0.8, -0.5, -0.2], [-0.5, -0.5, -0.5], [-0.4, -0.5, -0.6]])
-llambda = np.array([0.5, 0.3, 0.2])
-Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
-
-def pareto_obj(X_vec, llambda_vec, Aalpha, Oomega, Endow, m, n):
-    X = X_vec.reshape(n-1,m)
-    X_sum = np.sum(X, axis=0)
-    endow_sum = np.sum(Endow, axis=0)
-    X = np.append(X, [endow_sum-X_sum], axis=0)
-    llambda = llambda_vec
-    return util_social(X, Aalpha, Oomega, m, n, llambda)
-
-# Test
-X = np.array([[0.2, 0.2, 0.6], [0.2, 0.2, 0.6]])
-X_vec = X.reshape(m*(n-1),)
-
-llambda_vec = llambda
--pareto_obj(X_vec, llambda_vec, Aalpha, Oomega, Endow, m, n)
-
-obj = lambda x : -pareto_obj(x, llambda_vec, Aalpha, Oomega, Endow, m, n)
-
-x0 = np.ones((m*(n-1),))*0.21
-res = minimize(obj, x0, method='BFGS')
-
-Xres_vec = res.x
-Xres = Xres_vec.reshape(n-1,m)
-Xres_sum = np.sum(Xres, axis=0)
-endow_sum = np.sum(Endow, axis=0)
-Xres = np.append(Xres, [endow_sum- Xres_sum], axis=0) # pareto optimal allocation
-Xres
-
-# =========================================================
-# Problem 5: Equilibrium Allocation
-# =========================================================
-import numpy.matlib
-
-def getFocErr(price_vec, x_vec, e_vec, aalpha, oomega):
-    foc_err = 0
-    for k in range(m-1):
-        curr_foc_err = (((aalpha[k+1]*(x_vec[k+1]**oomega[k+1]))/price_vec[k+1]) - ((aalpha[0]*(x_vec[0]**oomega[0]))/price_vec[0]))**2
-        foc_err = foc_err + curr_foc_err
-    foc_err = foc_err + (np.dot(price_vec, x_vec) - np.dot(price_vec, e_vec))**2
-    return foc_err
-
-def getExcessDemand(price_vec, e_vec, aalpha, oomega, m, n):
-    """
-    price_vec = (m,)
-    aalpha = (m,)
-    oomega = (m,)
-    """
-    objfct = lambda x_vec: getFocErr(price_vec, x_vec, e_vec, aalpha, oomega)
-
-    x_vec0 = np.ones((m,))*0.5
-    res = minimize(objfct, x_vec0, method='BFGS')
-    x_vec1 = res.x
-
-    return x_vec1
-
-# Test
-price_vec = np.array([2, 2, 2])
-e_vec = np.array([0.5, 1, 1])
-aalpha = np.array([1/3, 1/3, 1/3])
-oomega = -np.array([0.9, 0.1, 0.0])
-
-getExcessDemand(price_vec, e_vec, aalpha, oomega, m, n)
-
-def getPriceFocErr(price_vec, E, Aalpha, Oomega, m, n):
-    sum_focerr = 0
-    for i in range(m):
-        sum_exdemand = 0
-        for j in range(n):
-            curr_aalpha = Aalpha[j,:]
-            curr_oomega = Oomega[j,:]
-            curr_exdemand = getExcessDemand(price_vec, e_vec, curr_aalpha, curr_oomega, m, n)
-            sum_exdemand = sum_exdemand + curr_exdemand
-        curr_focerr = (sum_exdemand[i] - np.sum(E[:,i]))**2
-        sum_focerr = sum_focerr + curr_focerr
-    return sum_focerr
-
-E = np.matlib.repmat(e_vec, 3, 1)
-Aalpha = np.matlib.repmat(aalpha, 3, 1)
-Oomega = np.matlib.repmat(oomega, 3, 1)
-price_vec = np.array([2, 2, 2])
-getPriceFocErr(price_vec, E, Aalpha, Oomega, m, n)
-
-def getEqPrice(E, Aalpha, Oomega, m, n):
-    objfct = lambda price_vec: getPriceFocErr(price_vec, E, Aalpha, Oomega, m, n)
-    p_vec0 = np.ones((m,))*2.0
-    res = minimize(objfct, p_vec0, method='BFGS')
-    p_vec1 = res.x
-    return p_vec1
-
-# ................
-# Symmetric Case I
-# ................
-
-Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
-Oomega = np.array([[-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, -0.5, -0.5]])
-Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
-
-getEqPrice(Endow, Aalpha, Oomega, m, n)
-
-
-# ..................
-# Asymmetric Case II
-# ..................
-
-Aalpha = np.array([[1/3, 1/3, 1/3], [1/3, 1/3, 1/3], [1/3, 1/3, 1/3]])
-Oomega = np.array([[-0.8, -0.5, -0.2], [-0.5, -0.5, -0.5], [-0.4, -0.5, -0.6]])
-Endow = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]])
-
-getEqPrice(Endow, Aalpha, Oomega, m, n)
-
-
-
-    
+        kkprime = kprime(kk, zz, ttheta, param)
+    cc = getConsumption(kk, zz, kkprime, param)
+    lhs = 1/cc
+    lhs = lhs[0]
+
+    zzidx = (zz == vProductivity)
+    currTransProb = mTransition[zzidx,:]
+    currTransProb = currTransProb[0,:]
+    rhs = 0
+    for i in range(currTransProb.size):
+        zzprime = vProductivity[i]
+        kprimeprime = kprime(kkprime, zzprime, ttheta, param)
+        ccprime = getConsumption(kkprime, zzprime, kprimeprime, param)
+        llprime = getLabor(ccprime, kkprime, zzprime, aalpha)
+        curr_rhs = (1/ccprime)*(aalpha*np.exp(zzprime)*kkprime**(aalpha-1)*llprime**(aalpha) + (1-ddelta))
+        rhs = rhs + currTransProb[i]*curr_rhs[0]
+    err = (lhs-rhs)**2
+    return err
+
+def sumedEEErr(ttheta, param):
+    res = 0 # collocation method
+    for iz in range(len(param["vProductivity"])):
+        for ik in range(len(param["vGridCapital"])):
+            kk = (param["vGridCapital"])[ik]
+            zz = (param["vProductivity"])[iz]
+            res += computeEEErr(kk, zz, ttheta, param)
+    print("Current EEE = ",res)
+    return res
+
+
+# ..................................................................
+# SET PARAMETERS
+aalpha = 1.0/3.0
+bbeta  = 0.97
+ddelta = 0.10
+
+vProductivity = np.array([-0.05, 0, 0.05],float)
+mTransition   = np.array([[0.97, 0.03, 0.00],
+                [0.01, 0.98, 0.01],
+                [0.00, 0.03, 0.97]],float)
+
+klSteadyState = (aalpha/((1/bbeta) - (1-ddelta)))**(1/(aalpha-1))
+qqq1= klSteadyState**aalpha - ddelta*klSteadyState
+qqq2 = (1-aalpha)*(klSteadyState**aalpha)
+lSteadyState = (qqq2/qqq1)**(1/2)
+capitalSteadyState = klSteadyState*lSteadyState
+outputSteadyState = (klSteadyState**aalpha)*lSteadyState
+
+nk = 10
+vGridCapital = np.arange(0.7*capitalSteadyState,1.3*capitalSteadyState,(1.7*capitalSteadyState-0.3*capitalSteadyState)/nk)
+
+nz = 3
+napprox = 5
+ttheta = np.ones((nz,napprox)) * 0.3 # [nz, 5-deg Cheby e.g.]
+
+param = dict()
+param["aalpha"] = 1.0/3.0
+param["bbeta"]  = 0.97
+param["ddelta"] = 0.10
+param["vProductivity"] = np.array([-0.05, 0, 0.05],float)
+param["mTransition"]   = np.array([[0.97, 0.03, 0.00],
+                [0.01, 0.98, 0.01],
+                [0.00, 0.03, 0.97]],float)
+param["vGridCapital"] = vGridCapital
+param["ttheta_shape"] = ttheta.shape
+param["tolerance"] = 1e2
+param["isFEM"] = False
+
+# while True:
+#     # opt = tf.keras.optimizers.Adam(learning_rate=0.1)
+#     # ttheta_x = tf.convert_to_tensor(ttheta, np.float32)
+
+#     objfun = lambda ttheta_x: sumedEEErr(ttheta_x, param)
+#     # def computeloss(param):
+#     #     objfun = sumedEEErr(ttheta_x, param)
+#     #     if np.isnan(objfun):
+#     #         objfun = np.Inf
+#     #     return tf.convert_to_tensor(objfun, np.float32)
+#     # step_count = opt.minimize(computeloss(param), var_list=[ttheta_x], tape=tf.GradientTape()).numpy()
+
+#     res = scipy.optimize.minimize(objfun, ttheta, options={"ftol":100})
+#     tthetaNew = np.reshape(res.x, ttheta.shape)
+#     maxDifference = (abs(tthetaNew-ttheta)).max()
+#     print("Max Differenct = ", maxDifference)
+#     print("Val = ", tthetaNew)
+#     print("Success? ", res['success'])
+#     if maxDifference < param["tolerance"]:
+#         if res['success']:
+#             break
+#     else:
+#         ttheta = tthetaNew
+
+# ..................................................................
+# COMPUTE
+
+# objfun = lambda ttheta_x: sumedEEErr(ttheta_x, param)
+# res = scipy.optimize.minimize(objfun, ttheta, options={"ftol":100, "maxiter":10})
+# tthetaNew = np.reshape(res.x, ttheta.shape)
+
+tthetaNew = np.array([[ 0.44335047,  0.43895593,  0.27687838, -0.02566881,  0.01528517],
+       [ 0.76238755,  0.49826251,  0.05140182,  0.0231563 ,  0.4679174 ],
+       [ 0.95213723,  0.48121215, -0.25572105, -0.1886888 ,  0.60561429]])
+
+policy_cheby = np.zeros((vGridCapital.size,3))
+for i in range(vGridCapital.size):
+    for j in range(3):
+        policy_cheby[i,j] = kprime(vGridCapital[i], vProductivity[j], tthetaNew, param)
+
+plt.plot(vGridCapital, policy_cheby[:,0], label="Low z")
+plt.plot(vGridCapital, policy_cheby[:,1], label="Medium z")
+plt.plot(vGridCapital, policy_cheby[:,2], label="High z")
+plt.xlabel("k")
+plt.ylabel("k'")
+plt.legend()
+plt.title("Projection Method using Chebyshev Polynomials")
+# plt.show()
+plt.close()
+
+
+
+# =========================================================================================
+# Problem 6: Finite Elements
+
+# param["isFEM"] = True
+# param["kfegrid"] = np.array([0.02, 0.1, 0.15, 0.25, 1, 1.2, 1.5, 2])
+# ttheta = np.ones((nz,napprox)) * 0.9 # [nz, 5-deg Cheby e.g.]
+
+# objfun = lambda ttheta_x: sumedEEErr(ttheta_x, param)
+# res = scipy.optimize.minimize(objfun, ttheta, options={"maxiter":100})
+# tthetaNew = np.reshape(res.x, ttheta.shape)
+
+tthetaNew = np.array([[1.27346957, 0.96132841, 0.7050724 , 0.86252981, 0.52249977],
+       [1.11692595, 0.84225103, 0.8612759 , 0.8360427 , 0.67221362],
+       [1.00541629, 0.70995305, 0.9154824 , 0.87916678, 0.75941391]])
+
+policy_fem = np.zeros((vGridCapital.size,3))
+for i in range(vGridCapital.size):
+    for j in range(3):
+        policy_fem[i,j] = kprime(vGridCapital[i], vProductivity[j], tthetaNew, param)
+
+plt.plot(vGridCapital, policy_fem[:,0], label="Low z")
+plt.plot(vGridCapital, policy_fem[:,1], label="Medium z")
+plt.plot(vGridCapital, policy_fem[:,2], label="High z")
+plt.xlabel("k")
+plt.ylabel("k'")
+plt.legend()
+plt.title("Projection Method using Finite Elements Method")
+# plt.show()
+
